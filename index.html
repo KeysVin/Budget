@@ -7,6 +7,7 @@
   <meta name="description" content="Suivi privé de patrimoine, sans connexion bancaire.">
   <title>Clair — Mon patrimoine</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -22,18 +23,29 @@
       <div id="notice" class="notice" role="status" hidden></div>
 
       <section class="summary" aria-label="Synthèse du portefeuille">
-        <article class="summary-main"><div class="summary-top"><span>Valeur totale</span><span class="live-pill" id="priceState">Cours en attente</span></div><div class="big-number" id="totalValue">0,00 €</div><div class="summary-foot"><span id="totalDelta" class="delta">+0,00 € (0,00 %)</span><span>par rapport aux montants versés</span></div></article>
-        <article class="summary-side"><span class="small-label">Montants versés</span><strong id="totalCost">0,00 €</strong><span class="small-label gap">Performance latente</span><strong id="totalGain">+0,00 €</strong><span class="fine-print">Hors fiscalité et frais éventuels.</span></article>
+        <article class="summary-main"><div class="summary-top"><span id="summaryScope">Portefeuille total</span><span class="live-pill" id="priceState">Cours en attente</span></div><div class="big-number" id="totalValue">0,00 €</div><div class="summary-foot"><span id="totalDelta" class="delta">+0,00 € (0,00 %)</span><span>par rapport aux montants versés</span></div></article>
+        <article class="summary-side"><span class="small-label">Montants versés</span><strong id="totalCost">0,00 €</strong><span class="small-label gap">Performance latente</span><strong id="totalGain">+0,00 €</strong><span class="fine-print">Hors fiscalité et frais éventuels.</span></article>
+      </section>
+
+      <section class="panel filter-panel" aria-label="Filtres d'affichage">
+        <div class="section-head"><div><h2>Filtres</h2><p>Affichez seulement les compartiments qui vous intéressent, par exemple PEA + assurance-vie.</p></div></div>
+        <div class="filter-row">
+          <label class="filter-chip"><input type="checkbox" name="scopeFilter" value="Épargne"> <span>Épargne</span></label>
+          <label class="filter-chip"><input type="checkbox" name="scopeFilter" value="PEA"> <span>PEA</span></label>
+          <label class="filter-chip"><input type="checkbox" name="scopeFilter" value="Assurance-vie"> <span>Assurance-vie</span></label>
+          <label class="filter-chip"><input type="checkbox" name="scopeFilter" value="Bitcoin"> <span>Bitcoin</span></label>
+        </div>
+        <p class="filter-summary" id="filterSummary">Tous les compartiments sont affichés.</p>
       </section>
 
       <section class="content-grid">
-        <article class="panel chart-panel"><div class="section-head"><div><h2>Évolution</h2><p>Valeur enregistrée depuis votre première utilisation</p></div><span class="chart-unit">EUR</span></div><div id="chart" class="chart" aria-label="Graphique d’évolution du patrimoine"></div><div id="chartEmpty" class="chart-empty" hidden>Le graphique se construira à mesure que des valeurs seront enregistrées.</div></article>
-        <article class="panel allocation-panel"><div class="section-head"><div><h2>Répartition</h2><p>Par type de placement</p></div></div><div class="donut-wrap"><div class="donut" id="donut"><div class="donut-center"><span>Total</span><strong id="donutTotal">0 €</strong></div></div></div><div id="allocationLegend" class="legend"></div></article>
+        <article class="panel chart-panel"><div class="section-head"><div><h2>Évolution</h2><p>Historique enregistré + repères visuels aux dates d’achat.</p></div><span class="chart-unit">EUR</span></div><div id="chart" class="chart" aria-label="Graphique d’évolution du patrimoine"></div><div id="chartEmpty" class="chart-empty" hidden>Le graphique se construit automatiquement avec vos enregistrements. Ajoutez des achats datés pour voir les repères historiques.</div><div id="chartMarkers" class="chart-markers"></div></article>
+        <article class="panel allocation-panel"><div class="section-head"><div><h2>Répartition</h2><p>Par type de placement</p></div></div><div class="donut-wrap"><div class="donut" id="donut"><div class="donut-center"><span>Total</span><strong id="donutTotal">0 €</strong></div></div></div><div id="allocationLegend" class="legend"></div></article>
       </section>
 
       <section class="panel assets-panel"><div class="section-head assets-head"><div><h2>Mes actifs</h2><p id="assetCount">0 actif</p></div><button type="button" class="text-btn" id="refreshBtn">↻ Actualiser les cours</button></div><div class="table-wrap"><table><thead><tr><th>Actif</th><th>Position</th><th>Valeur actuelle</th><th>Gain / perte</th><th></th></tr></thead><tbody id="assetsBody"></tbody></table></div><div id="emptyAssets" class="empty-assets"><div class="empty-icon">◈</div><h3>Votre suivi commence ici</h3><p>Ajoutez un livret, un ETF, du bitcoin ou une assurance-vie.</p><button class="btn btn-dark" id="emptyAddBtn" type="button">Ajouter mon premier actif</button></div></section>
 
-      <p class="footer-note">Les cours sont indicatifs et peuvent être différés. Les données sont conservées dans ce navigateur ; exportez-les régulièrement pour les sauvegarder.</p>
+      <p class="footer-note">Pour un livret, le solde actuel est le point d’ancrage : avec 3 000 € aujourd’hui et un mouvement de −200 € hier, Clair reconstruit automatiquement 3 200 € juste avant ce retrait. Pour un fonds euro comme « Objectif Climat », utilisez <strong>Fonds en euros · assurance-vie</strong> et ajoutez les versements/retraits si vous les connaissez.</p>
     </main>
   </div>
 
@@ -55,12 +67,26 @@
         <label for="name">Nom affiché</label>
         <input id="name" name="name" type="text" maxlength="80" placeholder="Ex. Livret A Banque Postale" required>
         <div id="manualFields">
-          <div class="field-row"><div><label for="currentValue">Valeur actuelle (€)</label><input id="currentValue" name="currentValue" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div><div><label for="costManual">Total versé (€)</label><input id="costManual" name="costManual" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div></div>
-          <p class="field-help">Le total versé sert à calculer les intérêts ou la performance.</p>
+          <div class="field-row"><div><label for="currentValue">Solde / valeur actuelle (€)</label><input id="currentValue" name="currentValue" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div><div><label for="costManual">Total net versé (€)</label><input id="costManual" name="costManual" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div></div>
+          <label for="openedOn">Date de début <span class="optional">(facultatif)</span></label>
+          <input id="openedOn" name="openedOn" type="date">
+          <p class="field-help">Le solde actuel sert de point d’ancrage. Les mouvements ci-dessous permettent de reconstruire le passé en sens inverse.</p>
+          <div id="movementSection" class="movement-section">
+            <div class="movement-head"><label>Mouvements datés</label><div class="movement-actions"><button type="button" class="text-btn" id="importMovementsBtn">Importer un tableur</button><button type="button" class="text-btn" id="addMovementBtn">＋ Ajouter un mouvement</button></div></div>
+            <div class="movement-grid-head"><span>Date</span><span>Mouvement (€)</span><span>Libellé</span><span></span></div>
+            <div id="movementRows" class="movement-rows"></div>
+            <input id="movementFile" type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden>
+            <p class="field-help">Format conseillé : <strong>Date</strong> ; <strong>Mouvement</strong> ; <strong>Libellé</strong> (facultatif). Exemple : 28/09/2026 ; -200 ; Retrait. Excel, LibreOffice, CSV et TSV sont acceptés.</p>
+            <p id="movementImportState" class="import-state" aria-live="polite"></p>
+          </div>
         </div>
         <div id="marketFields" hidden>
-          <div id="isinFields"><label for="isin">ISIN du support</label><input id="isin" name="isin" type="text" maxlength="12" placeholder="Ex. FR0010315770" autocomplete="off"><label for="ticker">Ticker boursier <span class="optional">(si disponible)</span></label><input id="ticker" name="ticker" type="text" maxlength="24" placeholder="Ex. CW8"><p class="field-help">Ajoutez chaque support dans une ligne distincte. Le ticker aide à obtenir le cours si le fournisseur ne prend pas l’ISIN en charge.</p></div>
-          <div class="field-row"><div><label for="quantity" id="quantityLabel">Nombre de parts</label><input id="quantity" name="quantity" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></div><div><label for="purchasePrice" id="purchasePriceLabel">Prix moyen d’achat (€ / part)</label><input id="purchasePrice" name="purchasePrice" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div></div>
+          <div id="isinFields"><label for="isin">ISIN du support</label><input id="isin" name="isin" type="text" maxlength="12" placeholder="Ex. FR0010315770" autocomplete="off"><label for="ticker">Ticker boursier <span class="optional">(si disponible)</span></label><input id="ticker" name="ticker" type="text" maxlength="24" placeholder="Ex. CW8"><p class="field-help">Ajoutez plusieurs achats sur une même ligne : la quantité totale et le prix moyen sont recalculés automatiquement.</p></div>
+          <div id="purchaseSection" class="purchase-section">
+            <div class="purchase-head"><label>Achats / occurrences</label><button type="button" class="text-btn" id="addPurchaseBtn">＋ Ajouter un achat</button></div>
+            <div class="purchase-grid-head"><span>Date</span><span>Quantité</span><span>Prix moyen (€ / part)</span><span></span></div>
+            <div id="purchaseRows" class="purchase-rows"></div>
+          </div>
           <div id="manualQuoteField"><label for="manualPrice">Cours actuel de secours (€ / part) <span class="optional">(facultatif)</span></label><input id="manualPrice" name="manualPrice" type="number" min="0" step="any" inputmode="decimal" placeholder="Ex. 6,25"><p class="field-help">Utilisé seulement si aucun cours automatique n’est disponible. Actualisez-le vous-même si besoin.</p></div>
           <p class="field-help">La valeur est calculée automatiquement dès qu’un cours est disponible.</p>
         </div>
