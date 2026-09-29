@@ -1,9 +1,25 @@
 const json = (data, status = 200) => Response.json(data, { status, headers: { "Cache-Control": "public, max-age=60, s-maxage=180" } });
+const parisTickers = new Set(["DCAM", "PAEEM", "PNAS"]);
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(8000) });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = typeof data.message === "string" ? data.message.replaceAll(process.env.TWELVE_DATA_API_KEY || "\u0000", "[clé masquée]").slice(0, 180) : "";
+    const error = new Error(detail || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function parseQuote(data, symbol, daily = false) {
+  if (data.status === "error") throw new Error(data.message || "Cours indisponible");
+  const price = Number(daily ? data.values?.[0]?.close : data.close ?? data.price);
+  const currency = String(daily ? data.meta?.currency || "" : data.currency || "").toUpperCase();
+  if (!Number.isFinite(price) || price <= 0) throw new Error(`Aucun cours disponible pour ${symbol}`);
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Devise du cours inconnue");
+  return { price, currency, asOf: daily ? data.values[0].datetime : data.datetime || new Date().toISOString(), source: daily ? "Twelve Data · clôture" : "Twelve Data" };
 }
 
 export default async (request) => {
@@ -22,14 +38,20 @@ export default async (request) => {
     try {
       const target = new URL("https://api.twelvedata.com/quote");
       target.searchParams.set(/^([A-Z]{2}[A-Z0-9]{10})$/.test(symbol) ? "isin" : "symbol", symbol);
+      if (parisTickers.has(symbol)) target.searchParams.set("mic_code", "XPAR");
       target.searchParams.set("apikey", key);
-      const data = await fetchJson(target);
-      const price = Number(data.close ?? data.price);
-      if (data.status === "error" || !Number.isFinite(price) || price <= 0) throw new Error(data.message || "Cours indisponible");
-      const currency = String(data.currency || "").toUpperCase();
-      if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Devise du cours inconnue");
-      quotes[symbol] = { price, currency, asOf: data.datetime || new Date().toISOString(), source: "Twelve Data" };
-    } catch (error) { errors[symbol] = error.message; }
+      quotes[symbol] = parseQuote(await fetchJson(target), symbol);
+    } catch (quoteError) {
+      try {
+        const target = new URL("https://api.twelvedata.com/time_series");
+        target.searchParams.set(/^([A-Z]{2}[A-Z0-9]{10})$/.test(symbol) ? "isin" : "symbol", symbol);
+        if (parisTickers.has(symbol)) target.searchParams.set("mic_code", "XPAR");
+        target.searchParams.set("interval", "1day");
+        target.searchParams.set("outputsize", "1");
+        target.searchParams.set("apikey", key);
+        quotes[symbol] = parseQuote(await fetchJson(target), symbol, true);
+      } catch (dailyError) { errors[symbol] = `${quoteError.message} ; clôture : ${dailyError.message}`; }
+    }
   }));
 
   if (wantBtc) {

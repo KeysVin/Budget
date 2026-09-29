@@ -20,7 +20,7 @@
   const signedMoney = n => `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`;
   const isMarket = kind => kind === "etf" || kind === "av-uc" || kind === "btc";
   const usesIsin = kind => kind === "etf" || kind === "av-uc";
-  const knownTickers = { FR001400U5Q4: "DCAM" };
+  const knownTickers = { FR001400U5Q4: "DCAM", FR0013412020: "PAEEM", FR001400ZGR7: "PNAS" };
   const today = () => new Date().toLocaleDateString("sv-SE");
   const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const safeNonNegative = value => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
