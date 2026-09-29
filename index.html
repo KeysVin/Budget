@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7f3">
+  <meta name="description" content="Suivi privé de patrimoine, sans connexion bancaire.">
+  <title>Clair — Mon patrimoine</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">◈</span><span>clair<span class="brand-dot">.</span></span></div>
+      <div class="top-actions"><span class="privacy">● Données sur cet appareil</span><button class="btn btn-light" id="exportBtn" type="button">Exporter</button><button class="btn btn-light" id="importBtn" type="button">Importer</button><input id="importFile" type="file" accept="application/json,.json" hidden></div>
+    </header>
+
+    <main>
+      <div class="heading"><div><p class="eyebrow">VUE D’ENSEMBLE</p><h1>Mon patrimoine</h1><p class="subhead">Vos comptes et placements, au même endroit.</p></div><button class="btn btn-dark" id="addBtn" type="button"><span aria-hidden="true">＋</span> Ajouter un actif</button></div>
+
+      <div id="notice" class="notice" role="status" hidden></div>
+
+      <section class="summary" aria-label="Synthèse du portefeuille">
+        <article class="summary-main"><div class="summary-top"><span>Valeur totale</span><span class="live-pill" id="priceState">Cours en attente</span></div><div class="big-number" id="totalValue">0,00 €</div><div class="summary-foot"><span id="totalDelta" class="delta">+0,00 € (0,00 %)</span><span>par rapport aux montants versés</span></div></article>
+        <article class="summary-side"><span class="small-label">Montants versés</span><strong id="totalCost">0,00 €</strong><span class="small-label gap">Performance latente</span><strong id="totalGain">+0,00 €</strong><span class="fine-print">Hors fiscalité et frais éventuels.</span></article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel chart-panel"><div class="section-head"><div><h2>Évolution</h2><p>Valeur enregistrée depuis votre première utilisation</p></div><span class="chart-unit">EUR</span></div><div id="chart" class="chart" aria-label="Graphique d’évolution du patrimoine"></div><div id="chartEmpty" class="chart-empty" hidden>Le graphique se construira à mesure que des valeurs seront enregistrées.</div></article>
+        <article class="panel allocation-panel"><div class="section-head"><div><h2>Répartition</h2><p>Par type de placement</p></div></div><div class="donut-wrap"><div class="donut" id="donut"><div class="donut-center"><span>Total</span><strong id="donutTotal">0 €</strong></div></div></div><div id="allocationLegend" class="legend"></div></article>
+      </section>
+
+      <section class="panel assets-panel"><div class="section-head assets-head"><div><h2>Mes actifs</h2><p id="assetCount">0 actif</p></div><button type="button" class="text-btn" id="refreshBtn">↻ Actualiser les cours</button></div><div class="table-wrap"><table><thead><tr><th>Actif</th><th>Position</th><th>Valeur actuelle</th><th>Gain / perte</th><th></th></tr></thead><tbody id="assetsBody"></tbody></table></div><div id="emptyAssets" class="empty-assets"><div class="empty-icon">◈</div><h3>Votre suivi commence ici</h3><p>Ajoutez un livret, un ETF, du bitcoin ou une assurance-vie.</p><button class="btn btn-dark" id="emptyAddBtn" type="button">Ajouter mon premier actif</button></div></section>
+
+      <p class="footer-note">Les cours sont indicatifs et peuvent être différés. Les données sont conservées dans ce navigateur ; exportez-les régulièrement pour les sauvegarder.</p>
+    </main>
+  </div>
+
+  <dialog id="assetDialog" aria-labelledby="dialogTitle">
+    <form id="assetForm" method="dialog" novalidate>
+      <div class="dialog-head"><div><p class="eyebrow">PORTEFEUILLE</p><h2 id="dialogTitle">Ajouter un actif</h2></div><button class="close-btn" id="closeDialog" type="button" aria-label="Fermer">×</button></div>
+      <div class="form-body">
+        <label for="kind">Type d’actif</label>
+        <select id="kind" name="kind">
+          <option value="livret-a">Livret A</option>
+          <option value="livret-jeune">Livret jeune</option>
+          <option value="pel">PEL</option>
+          <option value="av-euro">Fonds en euros · assurance-vie</option>
+          <option value="av-uc">Unité de compte · assurance-vie</option>
+          <option value="assurance-vie">Assurance-vie · valeur globale</option>
+          <option value="etf">ETF dans un PEA</option>
+          <option value="btc">Bitcoin</option>
+        </select>
+        <label for="name">Nom affiché</label>
+        <input id="name" name="name" type="text" maxlength="80" placeholder="Ex. Livret A Banque Postale" required>
+        <div id="manualFields">
+          <div class="field-row"><div><label for="currentValue">Valeur actuelle (€)</label><input id="currentValue" name="currentValue" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div><div><label for="costManual">Total versé (€)</label><input id="costManual" name="costManual" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div></div>
+          <p class="field-help">Le total versé sert à calculer les intérêts ou la performance.</p>
+        </div>
+        <div id="marketFields" hidden>
+          <div id="isinFields"><label for="isin">ISIN du support</label><input id="isin" name="isin" type="text" maxlength="12" placeholder="Ex. FR0010315770" autocomplete="off"><label for="ticker">Ticker boursier <span class="optional">(si disponible)</span></label><input id="ticker" name="ticker" type="text" maxlength="24" placeholder="Ex. CW8"><p class="field-help">Ajoutez chaque support dans une ligne distincte. Le ticker aide à obtenir le cours si le fournisseur ne prend pas l’ISIN en charge.</p></div>
+          <div class="field-row"><div><label for="quantity" id="quantityLabel">Nombre de parts</label><input id="quantity" name="quantity" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></div><div><label for="purchasePrice" id="purchasePriceLabel">Prix moyen d’achat (€ / part)</label><input id="purchasePrice" name="purchasePrice" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00"></div></div>
+          <p class="field-help">La valeur est calculée automatiquement dès qu’un cours est disponible.</p>
+        </div>
+        <div id="formError" class="form-error" role="alert" hidden></div>
+      </div>
+      <div class="dialog-actions"><button class="btn btn-light" id="cancelDialog" type="button">Annuler</button><button class="btn btn-dark" type="submit" id="saveBtn">Enregistrer</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

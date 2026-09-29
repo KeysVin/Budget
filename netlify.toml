@@ -1,0 +1,12 @@
+[build]
+  command = "mkdir -p dist && cp index.html app.js styles.css dist/"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
