@@ -20,6 +20,7 @@
   const signedMoney = n => `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`;
   const isMarket = kind => kind === "etf" || kind === "av-uc" || kind === "btc";
   const usesIsin = kind => kind === "etf" || kind === "av-uc";
+  const knownTickers = { FR001400U5Q4: "DCAM" };
   const today = () => new Date().toLocaleDateString("sv-SE");
   const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const safeNonNegative = value => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
@@ -48,23 +49,31 @@
     if (!a || typeof a.id !== "string" || !a.id || typeof a.name !== "string" || !a.name.trim() || a.name.length > 80 || !kinds[a.kind] || safeNonNegative(a.cost) === null) return false;
     if (!isMarket(a.kind)) return safeNonNegative(a.currentValue) !== null;
     if (safeNonNegative(a.quantity) === null || Number(a.quantity) <= 0) return false;
+    if (a.manualPrice !== undefined && (safeNonNegative(a.manualPrice) === null || Number(a.manualPrice) <= 0)) return false;
     if (a.kind === "btc") return true;
     return typeof a.isin === "string" && typeof a.ticker === "string" && (!a.isin || /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(a.isin)) && (!a.ticker || /^[A-Z0-9.:/-]{1,24}$/.test(a.ticker)) && Boolean(a.isin || a.ticker);
   }
   function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   function saveQuotes() { localStorage.setItem(PRICE_KEY, JSON.stringify(quoteCache)); }
-  function quoteSymbol(asset) { return asset.kind === "btc" ? "BTC" : (asset.ticker || asset.isin || "").toUpperCase(); }
+  function quoteSymbol(asset) { return asset.kind === "btc" ? "BTC" : (asset.ticker || knownTickers[asset.isin] || asset.isin || "").toUpperCase(); }
+  function marketPrice(asset) {
+    const quote = quoteCache.quotes[quoteSymbol(asset)];
+    if (quote && Number.isFinite(quote.price) && quote.price > 0) return { price: quote.price, source: quote.source };
+    if (Number.isFinite(Number(asset.manualPrice)) && Number(asset.manualPrice) > 0) return { price: Number(asset.manualPrice), source: "Cours saisi" };
+    return null;
+  }
   function assetValue(asset) {
     if (!isMarket(asset.kind)) return Number(asset.currentValue);
-    const quote = quoteCache.quotes[quoteSymbol(asset)];
-    return quote && Number.isFinite(quote.price) && quote.price > 0 ? Number(asset.quantity) * quote.price : Number(asset.cost);
+    const quote = marketPrice(asset);
+    return quote ? Number(asset.quantity) * quote.price : Number(asset.cost);
   }
-  function hasQuote(asset) { return !isMarket(asset.kind) || !!quoteCache.quotes[quoteSymbol(asset)]; }
+  function hasPrice(asset) { return !isMarket(asset.kind) || !!marketPrice(asset); }
   function totals() {
     const cost = state.assets.reduce((sum, a) => sum + Number(a.cost), 0);
     const value = state.assets.reduce((sum, a) => sum + assetValue(a), 0);
-    const pending = state.assets.filter(a => !hasQuote(a)).length;
-    return { cost, value, gain: value - cost, pct: cost > 0 ? ((value - cost) / cost) * 100 : 0, pending };
+    const pending = state.assets.filter(a => !hasPrice(a)).length;
+    const manual = state.assets.filter(a => isMarket(a.kind) && !quoteCache.quotes[quoteSymbol(a)] && a.manualPrice).length;
+    return { cost, value, gain: value - cost, pct: cost > 0 ? ((value - cost) / cost) * 100 : 0, pending, manual };
   }
   function snapshot() {
     if (!state.assets.length) return;
@@ -86,7 +95,7 @@
     $("totalDelta").textContent = `${signedMoney(t.gain)} (${percent(t.pct)})`;
     $("totalDelta").classList.toggle("negative", t.gain < 0);
     const asOf = quoteCache.fetchedAt ? new Date(quoteCache.fetchedAt) : null;
-    $("priceState").textContent = t.pending ? `${t.pending} cours manquant${t.pending > 1 ? "s" : ""}` : (asOf && state.assets.some(a => isMarket(a.kind)) ? `Cours ${asOf.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Valeurs saisies");
+    $("priceState").textContent = t.pending ? `${t.pending} cours manquant${t.pending > 1 ? "s" : ""}` : t.manual ? `${t.manual} cours saisi${t.manual > 1 ? "s" : ""}` : (asOf && state.assets.some(a => isMarket(a.kind)) ? `Cours ${asOf.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Valeurs saisies");
     $("assetCount").textContent = `${state.assets.length} actif${state.assets.length > 1 ? "s" : ""}`;
     renderAssets(); renderAllocation(); renderChart();
   }
@@ -104,7 +113,7 @@
       const position = cell(); position.textContent = isMarket(a.kind) ? `${number(a.quantity, a.kind === "btc" ? 8 : 4)} ${a.kind === "btc" ? "BTC" : "parts"}` : "Valeur saisie";
       if (isMarket(a.kind)) { const costSub = document.createElement("div"); costSub.className = "asset-sub"; costSub.textContent = `Achat : ${money(Number(a.cost) / Number(a.quantity))} / ${a.kind === "btc" ? "BTC" : "part"}`; position.append(costSub); }
       const valueTd = cell(); const valueNode = document.createElement("div"); valueNode.className = "value"; valueNode.textContent = money(value); valueTd.append(valueNode);
-      if (isMarket(a.kind)) { const sub = document.createElement("div"); sub.className = "asset-sub"; const quote = quoteCache.quotes[quoteSymbol(a)]; sub.textContent = quote ? `${money(quote.price)} / ${a.kind === "btc" ? "BTC" : "part"} · ${quote.source}` : "Estimation au prix d’achat"; valueTd.append(sub); }
+      if (isMarket(a.kind)) { const sub = document.createElement("div"); sub.className = "asset-sub"; const quote = marketPrice(a); sub.textContent = quote ? `${money(quote.price)} / ${a.kind === "btc" ? "BTC" : "part"} · ${quote.source}` : "Estimation au prix d’achat"; valueTd.append(sub); }
       const gainTd = cell(); gainTd.className = gain > 0 ? "gain-positive" : gain < 0 ? "gain-negative" : "gain-neutral"; gainTd.textContent = `${signedMoney(gain)} · ${percent(pct)}`;
       const actions = cell(); const wrap = document.createElement("div"); wrap.className = "row-actions";
       const edit = document.createElement("button"); edit.type = "button"; edit.className = "icon-btn"; edit.textContent = "✎"; edit.title = `Modifier ${a.name}`; edit.setAttribute("aria-label", edit.title); edit.addEventListener("click", () => openDialog(a));
@@ -147,7 +156,7 @@
 
   function updateFields() {
     const kind = $("kind").value, market = isMarket(kind);
-    $("manualFields").hidden = market; $("marketFields").hidden = !market; $("isinFields").hidden = !usesIsin(kind);
+    $("manualFields").hidden = market; $("marketFields").hidden = !market; $("isinFields").hidden = !usesIsin(kind); $("manualQuoteField").hidden = !usesIsin(kind);
     $("quantityLabel").textContent = kind === "btc" ? "Quantité de BTC" : "Nombre de parts";
     $("purchasePriceLabel").textContent = kind === "btc" ? "Prix moyen d’achat (€ / BTC)" : "Prix moyen d’achat (€ / part)";
     if (!editingId && !$("name").dataset.userEdited) $("name").value = kind === "btc" ? "Bitcoin" : kinds[kind].label.replace("ETF · PEA", "Mon ETF PEA");
@@ -157,7 +166,7 @@
     $("assetForm").reset(); $("name").dataset.userEdited = ""; $("formError").hidden = true;
     $("dialogTitle").textContent = asset ? "Modifier un actif" : "Ajouter un actif";
     $("saveBtn").textContent = asset ? "Enregistrer les modifications" : "Enregistrer";
-    if (asset) { $("kind").value = asset.kind; $("name").value = asset.name; $("currentValue").value = asset.currentValue ?? ""; $("costManual").value = asset.cost; $("isin").value = asset.isin || ""; $("ticker").value = asset.ticker || ""; $("quantity").value = asset.quantity ?? ""; $("purchasePrice").value = isMarket(asset.kind) ? Number(asset.cost) / Number(asset.quantity) : ""; }
+    if (asset) { $("kind").value = asset.kind; $("name").value = asset.name; $("currentValue").value = asset.currentValue ?? ""; $("costManual").value = asset.cost; $("isin").value = asset.isin || ""; $("ticker").value = asset.ticker || ""; $("quantity").value = asset.quantity ?? ""; $("purchasePrice").value = isMarket(asset.kind) ? Number(asset.cost) / Number(asset.quantity) : ""; $("manualPrice").value = asset.manualPrice ?? ""; }
     else $("kind").value = "livret-a";
     updateFields(); if (asset) $("name").value = asset.name;
     $("assetDialog").showModal();
@@ -177,10 +186,13 @@
       asset = { ...asset, quantity, cost };
       if (usesIsin(kind)) {
         const isin = $("isin").value.trim().toUpperCase(), ticker = $("ticker").value.trim().toUpperCase();
+        const manualPrice = $("manualPrice").value ? safeNonNegative($("manualPrice").value) : null;
         if (!isin && !ticker) return formError("Indiquez l’ISIN ou le ticker du support.");
         if (isin && !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isin)) return formError("L’ISIN doit contenir 12 caractères valides.");
         if (ticker && !/^[A-Z0-9.:/-]{1,24}$/.test(ticker)) return formError("Le ticker contient des caractères non valides.");
+        if ($("manualPrice").value && (manualPrice === null || manualPrice <= 0)) return formError("Le cours de secours doit être positif.");
         asset.isin = isin; asset.ticker = ticker;
+        if (manualPrice !== null) asset.manualPrice = manualPrice;
       }
     } else {
       const currentValue = safeNonNegative($("currentValue").value), cost = $("costManual").value ? safeNonNegative($("costManual").value) : currentValue;
@@ -211,7 +223,13 @@
       for (const [symbol, quote] of Object.entries(data.quotes || {})) if (quote.currency === "EUR" && Number.isFinite(quote.price)) quoteCache.quotes[symbol] = quote;
       quoteCache.fetchedAt = data.fetchedAt || new Date().toISOString(); saveQuotes(); snapshot(); render();
       const errors = Object.entries(data.errors || {});
-      if (errors.length) showNotice(`Cours non récupérés : ${errors.map(([s, e]) => `${s} (${e})`).join(" ; ")}. Vérifiez le ticker et la configuration API.`);
+      if (errors.length) {
+        const details = errors.map(([s, e]) => `${s} (${e})`).join(" ; ");
+        const advice = errors.some(([, e]) => e.includes("Clé Twelve Data absente"))
+          ? " Ajoutez TWELVE_DATA_API_KEY dans Netlify avec un plan couvrant le marché concerné, ou renseignez un cours actuel de secours en modifiant l’actif."
+          : " Vérifiez le ticker et l’accès de votre plan API ; un cours actuel de secours peut être saisi en modifiant l’actif.";
+        showNotice(`Cours non récupérés : ${details}.${advice}`);
+      }
       else $("notice").hidden = true;
     } catch (error) { showNotice(`Cours indisponibles : ${error.message}. En local, lancez l’app avec Netlify Dev pour activer la fonction de prix.`); }
     finally { $("refreshBtn").disabled = false; $("refreshBtn").textContent = "↻ Actualiser les cours"; }
