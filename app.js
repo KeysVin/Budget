@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const STORAGE_KEY = "clair-portfolio-v1";
-  const PRICE_KEY = "clair-price-cache-v1";
+  const PRICE_KEY = "clair-price-cache-v2";
   const kinds = {
     "livret-a": { label: "Livret A", group: "Épargne", color: "#348d6c" },
     "livret-jeune": { label: "Livret jeune", group: "Épargne", color: "#348d6c" },
@@ -22,6 +22,11 @@
   const usesIsin = kind => kind === "etf" || kind === "av-uc";
   const knownTickers = { FR001400U5Q4: "DCAM", FR0013412020: "PAEEM", FR001400ZGR7: "PNAS" };
   const today = () => new Date().toLocaleDateString("sv-SE");
+  const marketSlot = () => {
+    const now = new Date();
+    const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23" }).format(now));
+    return new Date(now.getTime() - (hour < 19 ? 24 * 60 * 60 * 1000 : 0)).toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+  };
   const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const safeNonNegative = value => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
   let editingId = null;
@@ -43,7 +48,7 @@
       const raw = JSON.parse(localStorage.getItem(PRICE_KEY));
       if (raw && typeof raw === "object" && raw.quotes && typeof raw.quotes === "object") return raw;
     } catch (_) { /* malformed cache */ }
-    return { quotes: {}, fetchedAt: null };
+    return { quotes: {}, fetchedAt: null, etfFetchedAt: null };
   }
   function validAsset(a) {
     if (!a || typeof a.id !== "string" || !a.id || typeof a.name !== "string" || !a.name.trim() || a.name.length > 80 || !kinds[a.kind] || safeNonNegative(a.cost) === null) return false;
@@ -58,7 +63,7 @@
   function quoteSymbol(asset) { return asset.kind === "btc" ? "BTC" : (asset.ticker || knownTickers[asset.isin] || asset.isin || "").toUpperCase(); }
   function marketPrice(asset) {
     const quote = quoteCache.quotes[quoteSymbol(asset)];
-    if (quote && Number.isFinite(quote.price) && quote.price > 0) return { price: quote.price, source: quote.source };
+    if (quote && Number.isFinite(quote.price) && quote.price > 0) return { price: quote.price, source: quote.source, asOf: quote.asOf };
     if (Number.isFinite(Number(asset.manualPrice)) && Number(asset.manualPrice) > 0) return { price: Number(asset.manualPrice), source: "Cours saisi" };
     return null;
   }
@@ -113,7 +118,7 @@
       const position = cell(); position.textContent = isMarket(a.kind) ? `${number(a.quantity, a.kind === "btc" ? 8 : 4)} ${a.kind === "btc" ? "BTC" : "parts"}` : "Valeur saisie";
       if (isMarket(a.kind)) { const costSub = document.createElement("div"); costSub.className = "asset-sub"; costSub.textContent = `Achat : ${money(Number(a.cost) / Number(a.quantity))} / ${a.kind === "btc" ? "BTC" : "part"}`; position.append(costSub); }
       const valueTd = cell(); const valueNode = document.createElement("div"); valueNode.className = "value"; valueNode.textContent = money(value); valueTd.append(valueNode);
-      if (isMarket(a.kind)) { const sub = document.createElement("div"); sub.className = "asset-sub"; const quote = marketPrice(a); sub.textContent = quote ? `${money(quote.price)} / ${a.kind === "btc" ? "BTC" : "part"} · ${quote.source}` : "Estimation au prix d’achat"; valueTd.append(sub); }
+      if (isMarket(a.kind)) { const sub = document.createElement("div"); sub.className = "asset-sub"; const quote = marketPrice(a); sub.textContent = quote ? `${money(quote.price)} / ${a.kind === "btc" ? "BTC" : "part"} · ${quote.source}${quote.source === "EODHD · clôture" && quote.asOf ? ` du ${new Date(`${quote.asOf}T12:00:00`).toLocaleDateString("fr-FR")}` : ""}` : "Estimation au prix d’achat"; valueTd.append(sub); }
       const gainTd = cell(); gainTd.className = gain > 0 ? "gain-positive" : gain < 0 ? "gain-negative" : "gain-neutral"; gainTd.textContent = `${signedMoney(gain)} · ${percent(pct)}`;
       const actions = cell(); const wrap = document.createElement("div"); wrap.className = "row-actions";
       const edit = document.createElement("button"); edit.type = "button"; edit.className = "icon-btn"; edit.textContent = "✎"; edit.title = `Modifier ${a.name}`; edit.setAttribute("aria-label", edit.title); edit.addEventListener("click", () => openDialog(a));
@@ -212,22 +217,25 @@
   async function refreshPrices(force = false) {
     const market = state.assets.filter(a => isMarket(a.kind));
     if (!market.length) return;
-    if (!force && quoteCache.fetchedAt && Date.now() - Date.parse(quoteCache.fetchedAt) < 5 * 60 * 1000) return;
-    const symbols = [...new Set(market.filter(a => usesIsin(a.kind)).map(quoteSymbol))];
-    const url = `/api/prices?symbols=${encodeURIComponent(symbols.join(","))}&btc=${market.some(a => a.kind === "btc") ? "1" : "0"}`;
+    const fetchEtfs = force || quoteCache.etfFetchedAt !== marketSlot();
+    const fetchBtc = market.some(a => a.kind === "btc") && (force || !quoteCache.fetchedAt || Date.now() - Date.parse(quoteCache.fetchedAt) >= 5 * 60 * 1000);
+    const symbols = fetchEtfs ? [...new Set(market.filter(a => usesIsin(a.kind)).map(quoteSymbol))] : [];
+    if (!symbols.length && !fetchBtc) return;
+    const url = `/api/prices?symbols=${encodeURIComponent(symbols.join(","))}&btc=${fetchBtc ? "1" : "0"}`;
     $("refreshBtn").disabled = true; $("refreshBtn").textContent = "Actualisation…";
     try {
       const response = await fetch(url, { headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error(`service indisponible (${response.status})`);
       const data = await response.json();
       for (const [symbol, quote] of Object.entries(data.quotes || {})) if (quote.currency === "EUR" && Number.isFinite(quote.price)) quoteCache.quotes[symbol] = quote;
+      if (symbols.length) quoteCache.etfFetchedAt = marketSlot();
       quoteCache.fetchedAt = data.fetchedAt || new Date().toISOString(); saveQuotes(); snapshot(); render();
       const errors = Object.entries(data.errors || {});
       if (errors.length) {
         const details = errors.map(([s, e]) => `${s} (${e})`).join(" ; ");
-        const advice = errors.some(([, e]) => e.includes("Clé Twelve Data absente"))
-          ? " Ajoutez TWELVE_DATA_API_KEY dans Netlify avec un plan couvrant le marché concerné, ou renseignez un cours actuel de secours en modifiant l’actif."
-          : " Vérifiez le ticker et l’accès de votre plan API ; un cours actuel de secours peut être saisi en modifiant l’actif.";
+        const advice = errors.some(([, e]) => e.includes("Clé EODHD absente"))
+          ? " Ajoutez EODHD_API_KEY dans Netlify, puis relancez un déploiement."
+          : " Vérifiez l’ISIN ou le ticker chez EODHD ; un cours actuel de secours peut être saisi en modifiant l’actif.";
         showNotice(`Cours non récupérés : ${details}.${advice}`);
       }
       else $("notice").hidden = true;
